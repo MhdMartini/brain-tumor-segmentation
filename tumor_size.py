@@ -3,21 +3,16 @@ import os
 import cv2
 import numpy as np
 
-parser = argparse.ArgumentParser(description='Calculate the tumor size in MRI brain scans')
-parser.add_argument('dir', type=str,
-                    help='Directory containing MRI scans')
-
-args = parser.parse_args()
-
 
 class TumorSize:
-    def __init__(self):
-        self.VOLS = {}  # tumors' volumes
-        self.SCAN_AREA = 0.4 * 0.4  # 40 cm wide and 40 cm high
-        self.SEG_WIDTH = 0.002  # 2 mm between two scans
+    def __init__(self, scan_area, seg_width, dir):
+        self.vols = {}  # tumors' volumes
+        self.scan_area = scan_area
+        self.seg_width = seg_width
+        self.dir = dir
         self.rows, self.cols = 0, 0
 
-        self.dir = args.dir
+        self.dir = dir
         self.calculate()
 
     def get_area(self, image):
@@ -32,10 +27,6 @@ class TumorSize:
 
     def fill_boundaries(self, boundary):
         # find centroids and fill contours
-        # M = cv2.moments(boundary)
-        # cX = int(M["m10"] / M["m00"])
-        # cY = int(M["m01"] / M["m00"])
-
         mask = np.copy(boundary)
         pattern = [0, 255, 0, 255, 0]
 
@@ -80,19 +71,21 @@ class TumorSize:
             size = int((area / np.pi) ** 0.5)
             size -= (size % 2) - 1
             thresh_type = cv2.ADAPTIVE_THRESH_MEAN_C
-            image_proc = cv2.adaptiveThreshold(img, 255, thresh_type, cv2.THRESH_BINARY, size, 0)
+            image_proc = cv2.adaptiveThreshold(
+                img, 255, thresh_type, cv2.THRESH_BINARY, size, 0)
             result = cv2.bitwise_and(mask, image_proc)
-            path = os.path.join("output", image_name.replace(image_name.split(".")[0], image_name.split(".")[0] + "_tumor"))
+            path = os.path.join("output", image_name.replace(
+                image_name.split(".")[0], image_name.split(".")[0] + "_tumor"))
             cv2.imwrite(path, result)
 
             pixels_num = result.shape[0] * result.shape[1]
-            area_per_pixel = self.SCAN_AREA / pixels_num
+            area_per_pixel = self.scan_area / pixels_num
             tumor_area_pixel = self.get_area(result)
             tumor_area_msquared = tumor_area_pixel * area_per_pixel
-            self.VOLS[image_name] = tumor_area_msquared * self.SEG_WIDTH
+            self.vols[image_name] = tumor_area_msquared * self.seg_width
 
         total = 0
-        for name, vol in self.VOLS.items():
+        for name, vol in self.vols.items():
             vol *= 1e6  # to cm cubed
             vol = round(vol, 3)
             total += vol
@@ -102,4 +95,16 @@ class TumorSize:
 
 
 if __name__ == '__main__':
-    TumorSize()
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Calculated brain tumor volume from outlined MRI images')
+    parser.add_argument('--scan_shape', type=float, nargs='+', default=(0.4, 0.4),
+                        help='height and width of scan area in meters')
+    parser.add_argument('--seg_width', type=float, default=2e-3,
+                        help='distance in meters between two consecutive MRI scans')
+    parser.add_argument('dir', type=str,
+                        help='directory containing MRI scans')
+    args = parser.parse_args()
+
+    scan_area = args.scan_shape[0] * args.scan_shape[1]
+    TumorSize(scan_area, args.seg_width, args.dir)
